@@ -2,10 +2,14 @@ import { RecStatus } from '@geeqdev/geeq_capnp_ts/dest/recStatus.capnp';
 
 import { ProxyCreateTxPayloadWrapper } from '../../wrappers/uvt/proxy-create-transaction-payload';
 import { ProxyCreateNotaryTxWrapper } from '../../wrappers/uvt/proxy-create-notary-transaction';
+import { TokenAssetSubgroupsWrapper } from '../../wrappers/coin-account-record/token-asset-sg';
+import { NftAssetSubgroupWrapper } from '../../wrappers/coin-account-record/nft-asset-sg';
 import { AcctNumMultiUserWrapper } from '../../wrappers/uvt/account-num-multi-user';
+import { CoinAssetTxWrapper } from '../../wrappers/uvt/coin-asset-transaction';
 import { ValLayLedgerWrapper } from '../../wrappers/validation-layer-ledger';
-import { NodeTxListWrapper } from '../../wrappers/node-transaction-list';
+import { CoinTxPayloadWrapper } from '../../wrappers/uvt/coin-tx-payload';
 import { NetActorRecWrapper } from '../../wrappers/network-actor-record';
+import { NodeTxListWrapper } from '../../wrappers/node-transaction-list';
 import { AccountHashBuffer } from '../../buffers/account-hash';
 import { PublicKeyBuffer } from '../../buffers/public-key';
 import { UnverValTxWrapper } from '../../wrappers/uvt';
@@ -13,19 +17,19 @@ import { Simulator } from '../../geeq/simulator';
 import { Config } from '../../../configs/config';
 import { BaseBuffer } from '../../buffers/base';
 import { GeeqAmount } from '../../geeq-amount';
-import { getNonce, randomAcctNum, randomAppHash } from '../../../helper';
 import { GeeqNode } from '../../geeq/node';
 import { Crypto } from '../../crypto';
+import {
+  getNonce,
+  randomAcctNum,
+  randomAppHash,
+} from '../../../helper';
 import {
   CreateProxyResult,
   FindNar,
   FindRecordInVll,
   FindUvtResult,
 } from './interfaces';
-import { NftAssetSubgroupWrapper } from '../../wrappers/coin-account-record/nft-asset-sg';
-import { CoinAssetTxWrapper } from '../../wrappers/uvt/coin-asset-transaction';
-import { CoinTxPayloadWrapper } from '../../wrappers/uvt/coin-tx-payload';
-import { TokenAssetSubgroupsWrapper } from '../../wrappers/coin-account-record/token-asset-sg';
 
 export class UVT {
   private readonly crypto: Crypto;
@@ -188,118 +192,6 @@ export class UVT {
     }
   }
 
-  public async findNar(
-    node: GeeqNode,
-    acctNumReceive: AccountHashBuffer,
-    startBlock: number,
-    finishBlock = startBlock + 10,
-  ): Promise<FindNar> {
-    if (startBlock > finishBlock) {
-      return {
-        nar: undefined,
-        vll: undefined,
-      };
-    }
-
-    let vll: ValLayLedgerWrapper;
-    let nar: NetActorRecWrapper;
-    try {
-      vll = await node.getVllByBlockNumber(startBlock);
-      nar = vll.getNetworkActors().getAllNodes()
-        .find((node) => node.accountNumVal.toString() === acctNumReceive.toString());
-    } catch (e) {
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    }
-
-    if (nar) {
-      return {
-        nar,
-        vll,
-      };
-    }
-
-    console.log(`Waiting 4 sec; blockNumber = ${startBlock}`);
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-
-    return this.findNar(node, acctNumReceive, startBlock + 1, finishBlock);
-  }
-
-  public async findLeavingNar(
-    node: GeeqNode,
-    acctNumReceive: AccountHashBuffer,
-    startBlock: number,
-    finishBlock = startBlock + 10,
-  ): Promise<FindNar> {
-    if (startBlock > finishBlock) {
-      return {
-        nar: undefined,
-        vll: undefined,
-      };
-    }
-
-    const vll = await node.getVllByBlockNumber(startBlock);
-    const nar = vll.getNetworkActors().getAllNodes()
-      .find((node) => node.accountNumVal.toString() === acctNumReceive.toString());
-
-    if (nar) {
-      if (nar.recordStatus === RecStatus.NET_STATUS_LEAVING) {
-        return {
-          nar,
-          vll,
-        };
-      }
-    }
-
-    console.log(`Waiting 4 sec, blockNum = ${startBlock}`);
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-
-    return this.findLeavingNar(node, acctNumReceive, startBlock + 1, finishBlock);
-  }
-
-  public async checkLastLeavingNar(
-    node: GeeqNode,
-    acctNumReceive: AccountHashBuffer,
-    lastBlockNum: number,
-  ): Promise<NetActorRecWrapper> {
-    const currentVll = await node.getCurrentVll();
-    if (currentVll.getBlockNumber() === lastBlockNum) {
-      const nar = currentVll.getNetworkActors().getAllNodes()
-        .find((node) => node.accountNumVal === acctNumReceive);
-
-      if (nar) {
-        return nar;
-      }
-
-      return undefined;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    return this.checkLastLeavingNar(node, acctNumReceive, lastBlockNum);
-  }
-
-  public async checkDeletedNar(
-    node: GeeqNode,
-    acctNumReceive: AccountHashBuffer,
-    startBlock: number,
-  ): Promise<boolean> {
-    const currentVll = await node.getCurrentVll();
-    if (currentVll.getBlockNumber() > startBlock + 15) {
-      return false;
-    }
-
-    if (startBlock + 10 < currentVll.getBlockNumber()) {
-      const nar = currentVll.getNetworkActors().getAllNodes()
-        .find((node) => node.accountNumVal === acctNumReceive);
-
-      if (!nar) {
-        return true;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    return this.checkDeletedNar(node, acctNumReceive, startBlock);
-  }
-
   public async checkUutStatus(
     refHash: BaseBuffer,
     node: GeeqNode,
@@ -332,56 +224,5 @@ export class UVT {
     }
 
     return this.checkUutStatus(refHash, node, startBlock + 1, finishBlock);
-  }
-
-  public async findUvtInVlb(
-    uvtTx: UnverValTxWrapper,
-    node: GeeqNode,
-    startBlock: number,
-    finishBlock = startBlock + 9,
-  ): Promise<FindUvtResult | undefined> {
-    if (startBlock > finishBlock) {
-      return undefined;
-    }
-
-    let uvt;
-    let vlb;
-    let ntl;
-    let blockNumber;
-    try {
-      vlb = await node.getVlbByBlockNumber(startBlock);
-      ntl = vlb.nodeTxLists.find((ntl: NodeTxListWrapper) => {
-        const myUvt = ntl
-          .getUvts()
-          .find(
-            (tx: UnverValTxWrapper) => {
-              if (tx.getBuffer().toString() === uvtTx.getBuffer().toString()) {
-                uvt = tx;
-                blockNumber = startBlock;
-              }
-
-              return uvt;
-            },
-          );
-
-        return myUvt !== undefined;
-      });
-    } catch (err) {
-      console.log(startBlock);
-      console.log(err);
-      await new Promise((resolve) => setTimeout(resolve, 4000));
-    }
-
-    if (!ntl) {
-      console.log(`Waiting 4 sec, BlockNumber = ${startBlock}`);
-      await new Promise((resolve) => setTimeout(resolve, 4000));
-
-      return this.findUvtInVlb(uvtTx, node, startBlock + 1, finishBlock);
-    }
-
-    return {
-      uvt,
-      blockNumber,
-    };
   }
 }
